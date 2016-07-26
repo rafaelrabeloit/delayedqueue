@@ -75,21 +75,21 @@ public class DelayedQueueTest extends TestCase {
                 DateTime.now().plus(11).getMillis()));
         Thread.sleep(12);
 
-        assertNotNull("Element was mistenkly removed with stoped timer",
+        assertNotNull("Element was mistakenly removed with stopped timer",
                 queue.peek());
-        assertEquals("Listener method was called with timer stoped", 0,
+        assertEquals("Listener method was called with timer stopped", 0,
                 callCount);
 
         queue.add(new DelayedItem<Object, Object>(
                 DateTime.now().minusSeconds(1).getMillis()));
         assertEquals(
-                "Listener method was called with timer stoped with passed time",
+                "Listener method was called with timer stopped with passed time",
                 0, callCount);
 
         // Start again to check if the elements are consumed
         queue.start();
 
-        Thread.sleep(5);
+        Thread.sleep(10);
 
         assertNull("Failed to remove the elements", queue.peek());
         assertEquals("All element should fire", 3, callCount);
