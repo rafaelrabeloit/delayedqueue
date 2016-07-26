@@ -20,7 +20,7 @@ import org.joda.time.DateTimeUtils;
  * @param <I> The type for Id
  * @param <D> The type for Data
  *
- * @see {@link DelayedItem}
+ * @see DelayedItem
  */
 public final class DelayedQueue<I, D>
         extends PriorityBlockingQueue<DelayedItem<I, D>> {
@@ -457,11 +457,11 @@ public final class DelayedQueue<I, D>
         }
 
         /**
-         * Makes use of {@link Thread#sleep()} method to wait for
+         * Makes use of {@link Thread#sleep} method to wait for
          * {@link DelayedConsumer#mWaitingTime} ms to remove the queue's
-         * head and fire the {@link OnTimeListener#onTime(DelayedItem)}
+         * head and fire the {@link OnTimeListener#onTime}
          * event.
-         * @see {@link OnTimeListener#onTime(DelayedItem)}
+         * @see OnTimeListener#onTime
          */
         @Override
         public void run() {

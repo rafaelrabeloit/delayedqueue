@@ -13,7 +13,7 @@ public class DelayedItem<I, D> implements Comparable<DelayedItem<I, D>> {
 
     /**
      * "Future" timestamp to when this item should fire.
-     * If not set, is supposed @see {@link Integer#MAX_VALUE} or
+     * If not set, is supposed {@link Integer#MAX_VALUE} or
      * the End of Times.
      */
     private Long mTime;
