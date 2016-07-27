@@ -111,6 +111,7 @@ public class DelayedQueueTest extends TestCase {
         DelayedItem<Object, Object> late = new DelayedItem<Object, Object>(
                 DateTime.now().minusSeconds(1).getMillis(), 2L);
         queue.add(late);
+        Thread.sleep(20);
         assertEquals("Listener not fired when add an already passed time", 2,
                 callCount);
         assertEquals("The right element was not passed to the listener", late,
