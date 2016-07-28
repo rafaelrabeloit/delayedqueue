@@ -2,6 +2,7 @@ package com.neptune.queue;
 
 import java.util.LinkedList;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
 
 import junit.framework.TestCase;
 
@@ -24,14 +25,13 @@ public class DelayedQueueTest extends TestCase {
 
     DelayedItem<Object, Object> result;
 
-    OnTimeListener<Object, Object> listener = 
-            new OnTimeListener<Object, Object>() {
-                @Override
-                public void onTime(DelayedItem<Object, Object> e) {
-                    callCount++;
-                    result = e;
-                }
-            };
+    OnTimeListener<Object, Object> listener = new OnTimeListener<Object, Object>() {
+        @Override
+        public void onTime(DelayedItem<Object, Object> e) {
+            callCount++;
+            result = e;
+        }
+    };
 
     private DelayedQueue<Object, Object> queue;
 
@@ -129,10 +129,12 @@ public class DelayedQueueTest extends TestCase {
     }
 
     @Test
-    public void test_simpleRemoves() throws InterruptedException {
+    public void test_simpleRemoves()
+            throws InterruptedException, ExecutionException {
         // This process is kind of slow...
         queue.addAll(addList);
 
+        System.out.println("1");
         assertTrue("Removing the first item from the queue failed",
                 queue.remove(addList.get(0)));
         assertFalse("The right element was removed",
@@ -142,19 +144,20 @@ public class DelayedQueueTest extends TestCase {
         assertEquals("Wrong size based on List after removed",
                 addList.size() - 1, queue.size());
 
-        Thread.sleep(queue.peek().getTime() - DateTimeUtils.currentTimeMillis()
-                + 30);
+        System.out.println("2");
+        queue.get();
+        System.out.println("3");
         assertEquals("Listener method was not called the right amount of times",
                 1, callCount);
         assertEquals("The right element was not passed to the listener",
                 addList.get(1), result);
 
+        System.out.println("4");
         assertEquals("Polled element failed", addList.get(2), queue.poll());
         assertEquals("Wrong size based on List after removed",
                 addList.size() - 3, queue.size());
 
-        Thread.sleep(queue.peek().getTime() - DateTimeUtils.currentTimeMillis()
-                + 30);
+        queue.get();
         assertEquals("Listener method was not called the right amount of times",
                 2, callCount);
         assertEquals("The right element was not passed to the listener",

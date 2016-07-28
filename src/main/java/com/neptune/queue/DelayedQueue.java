@@ -1,6 +1,9 @@
 package com.neptune.queue;
 
 import java.util.Collection;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
@@ -14,19 +17,28 @@ import org.apache.logging.log4j.Logger;
 import org.joda.time.DateTimeUtils;
 
 /**
- * Delayed Queue collection class. It is a blocking queue (its operations are
- * sync) with one thread per queue option or one thread per item option
- * {@link DelayedItem} should be used as item.
+ * Delayed Queue collection class. It is a blocking queue {@link DelayedItem}
+ * should be used as item, because it ensures timing and id.
+ *
+ * There are 3 thread systems running for each instance of this class. The
+ * Consumer thread is a single instance thread that is scheduled when an element
+ * should be consumed in the future. The OnTime Threads are the ones that are
+ * fired for the Listener, and therefore the listener events happens in those
+ * threads and not in the main. The Data Thread are threads that can be created
+ * if the object Data D implements runnable, and can be executed when the item
+ * is consumed.
+ * 
  * @author Rafael
  *
- * @param <I> The type for Id
- * @param <D> The type for Data
+ * @param <I>
+ *            The type for Id
+ * @param <D>
+ *            The type for Data
  *
  * @see DelayedItem
  */
 public final class DelayedQueue<I, D>
-        extends PriorityBlockingQueue<DelayedItem<I, D>>
-		implements Runnable {
+        extends PriorityBlockingQueue<DelayedItem<I, D>> {
 
     /**
      * Logger.
@@ -41,11 +53,11 @@ public final class DelayedQueue<I, D>
     /**
      * Dummy listener to avoid null pointer exceptions.
      */
-    private static final OnTimeListener<Object, Object> DUMMY =
-            new OnTimeListener<Object, Object>() {
-                @Override
-                public void onTime(final DelayedItem<Object, Object> e) { }
-            };
+    private static final OnTimeListener<Object, Object> DUMMY = new OnTimeListener<Object, Object>() {
+        @Override
+        public void onTime(final DelayedItem<Object, Object> e) {
+        }
+    };
 
     /**
      * Timing listener. Starts with null, but is assigned to a dummy later.
@@ -61,14 +73,52 @@ public final class DelayedQueue<I, D>
     /**
      * Executor that runs this Delayed Queue.
      */
-    ScheduledExecutorService executor;
-	private ScheduledFuture<?> future;
+    private ScheduledExecutorService executor;
+
+    /**
+     * The Future representation of the Consumer
+     */
+    private ScheduledFuture<DelayedItem<I, D>> future;
+
+    /**
+     * This class is responsible for Consuming the Queue elements and fire the
+     * listener methods when appropriate. It is a class used as one instance
+     * only, because 1) Hides the run method ensuring that this is the only way
+     * to control the DelayedQueue 2) It is a better pattern and 3) The Thread
+     * Pool can take advantage of having the same Runnable firing multiple
+     * times.
+     */
+    private Callable<DelayedItem<I, D>> consumer = new Callable<DelayedItem<I, D>>() {
+
+        /**
+         * Remove the queue's head and fire the {@link OnTimeListener#onTime}
+         * event.
+         * 
+         * @see OnTimeListener#onTime
+         */
+        public DelayedItem<I, D> call() {
+            LOGGER.trace("call() {");
+            lock.lock();
+
+            try {
+
+                DelayedItem<I, D> item = DelayedQueue.this.poll();
+                LOGGER.debug("Consuming (" + item + ")");
+
+                DelayedQueue.this.consume(item);
+
+                return item;
+            } finally {
+                lock.unlock();
+                LOGGER.trace("call() }");
+            }
+        }
+    };
 
     /**
      * Consuming Thread(s) state.
      */
     private boolean started;
-
 
     /**
      * Initialize the Queue with an Executor and a Thread Timer in it.
@@ -103,15 +153,12 @@ public final class DelayedQueue<I, D>
 
     /**
      * Interrupt a waiting thread and wait for it to finish.
-     * @param t thread to interrupt
      */
     private void interrupt() {
-        LOGGER.debug("Consumer registred, interrupting it...");
-        executor.shutdownNow();
-        try {
-        	executor.awaitTermination(Long.MAX_VALUE, TimeUnit.MILLISECONDS);
-        } catch (InterruptedException e) {
-            LOGGER.warn("awaitTermination() fired an InterruptedException");
+        // Does not cancel a running task
+        if (future != null && future.getDelay(TimeUnit.MILLISECONDS) <= 0) {
+            LOGGER.debug("Consumer registred, interrupting it...");
+            future.cancel(false);
         }
     }
 
@@ -119,7 +166,8 @@ public final class DelayedQueue<I, D>
      * Reschedule the queue thread.
      */
     private void reschedule() {
-
+        LOGGER.trace("reschedule() {");
+        
         if (!started) {
             return;
         }
@@ -127,34 +175,40 @@ public final class DelayedQueue<I, D>
         lock.lock();
 
         try {
-	        interrupt();
-	
-	        if (peek() != null) {
-	        	// Calculate the waiting time for the HEAD
-	            long waitingTime = peek().getTime()
-	                    - DateTimeUtils.currentTimeMillis();
-	
-	            if (waitingTime < 0) {
-	            	LOGGER.info("Negative time! Was the Queue stopped? Setting time to NOW.");
-	            	waitingTime = 0;
-	            }
+            interrupt();
 
-                LOGGER.info(
-                        "Scheduling (" + peek() + ") to " + waitingTime + " ms");
-                future = executor.schedule(this, waitingTime, TimeUnit.MILLISECONDS);
-	
-	        } else {
-	            LOGGER.info("Empty Queue");
-	        }
+            if (peek() != null) {
+                // Calculate the waiting time for the HEAD
+                long waitingTime = peek().getTime()
+                        - DateTimeUtils.currentTimeMillis();
+
+                if (waitingTime < 0) {
+                    LOGGER.info("Negative time! Was the Queue stopped? "
+                            + "Setting time to NOW.");
+                    waitingTime = 0;
+                }
+
+                LOGGER.info("Scheduling element (" + peek() + ")" + " to "
+                        + waitingTime + " ms");
+
+                future = executor.schedule(consumer, waitingTime,
+                        TimeUnit.MILLISECONDS);
+
+            } else {
+                LOGGER.info("Empty Queue");
+            }
         } finally {
             lock.unlock();
+            LOGGER.trace("reschedule() }");
         }
     }
 
     /**
      * Set the listener for when the timer for the top object is fired. Setting
      * it to null will disable listening.
-     * @param onTimeListener Listener to be used when a element is fired
+     * 
+     * @param onTimeListener
+     *            Listener to be used when a element is fired
      */
     @SuppressWarnings("unchecked")
     public void setOnTimeListener(final OnTimeListener<I, D> onTimeListener) {
@@ -164,6 +218,62 @@ public final class DelayedQueue<I, D>
             // Empty listener that doesn't cause null pointer exceptions
             this.mOnTimeListener = (OnTimeListener<I, D>) DUMMY;
         }
+    }
+
+    /**
+     * Consumes an item. It creates a separated thread for the listener method
+     * call. Also, if the Data element implements Runnable, runs it.
+     * 
+     * @param item
+     */
+    private void consume(DelayedItem<I, D> item) {
+        if (item.getData() != null
+                && item.getData().getClass().isAssignableFrom(Runnable.class)) {
+
+            Runnable runnableData = (Runnable) item.getData();
+
+            Thread threadData = new Thread(runnableData);
+            threadData.start();
+
+        }
+
+        Runnable runnableOnTime = () -> {
+            DelayedQueue.this.mOnTimeListener.onTime(item);
+            LOGGER.debug("Consumed");
+        };
+
+        Thread threadOnTime = new Thread(runnableOnTime);
+        threadOnTime.start();
+    }
+
+    /**
+     * Get the item, waiting for its timeout to happen
+     * @return the head element, null if it is not available or if error.
+     * @throws InterruptedException if the consumer thread is 
+     *         interrupted (probably never)
+     * @throws ExecutionException if the consumer thread fired an exception
+     */
+    public DelayedItem<I, D> get()
+            throws InterruptedException, ExecutionException {
+        LOGGER.trace("get() {");
+        try {
+//            if (future == null) {
+//                return null;
+//            } else {
+//                return future.get();
+//            }
+            ScheduledFuture<DelayedItem<I, D>> future = this.future;
+            while(!future.isDone()) {
+                Thread.sleep(10);
+                LOGGER.debug("Timing is " + future.getDelay(TimeUnit.MILLISECONDS));
+            }
+            return null;
+        } catch (CancellationException e) {
+            return null;
+        } finally {
+            LOGGER.trace("get() }");
+        }
+        
     }
 
     /**
@@ -194,9 +304,7 @@ public final class DelayedQueue<I, D>
      * Depends on offer() implementation.
      */
     @Override
-    public boolean offer(
-            final DelayedItem<I, D> e,
-            final long timeout,
+    public boolean offer(final DelayedItem<I, D> e, final long timeout,
             final TimeUnit unit) {
         return super.offer(e, timeout, unit);
     }
@@ -213,23 +321,17 @@ public final class DelayedQueue<I, D>
             // If the time has passed already,
             // doesn't even add to the queue
             if (e.getTime() < DateTimeUtils.currentTimeMillis() && started) {
-
-            	Runnable runnableOnTime = () -> {
-                    this.mOnTimeListener.onTime(e);
-                    LOGGER.info("Consuming early " + e);
-            	};
-
-            	Thread threadOnTime = new Thread(runnableOnTime);
-            	threadOnTime.start();
+                LOGGER.debug("Consuming Early");
+                consume(e);
 
                 return true;
             } else {
 
-	            returned = super.offer(e);
-	
-	            if (returned && peek() == e) {
-	                reschedule();
-	            }
+                returned = super.offer(e);
+
+                if (returned && peek() == e) {
+                    reschedule();
+                }
             }
 
         } finally {
@@ -435,54 +537,19 @@ public final class DelayedQueue<I, D>
     /**
      * Interface for Listening on timings.
      *
-     * @param <I> The type for Id
-     * @param <D> The type for Data
+     * @param <I>
+     *            The type for Id
+     * @param <D>
+     *            The type for Data
      */
     public interface OnTimeListener<I, D> {
         /**
          * Fired when a thread finishes waiting.
-         * @param e element that was fired
+         * 
+         * @param e
+         *            element that was fired
          */
         void onTime(DelayedItem<I, D> e);
     }
 
-    /**
-     * Makes use of {@link Thread#sleep} method to wait for
-     * {@link DelayedConsumer#mWaitingTime} ms to remove the queue's
-     * head and fire the {@link OnTimeListener#onTime}
-     * event.
-     * @see OnTimeListener#onTime
-     */
-	@Override
-	public void run() {
-
-        lock.lock();
-
-        try {
-
-    		DelayedItem<I, D> item = DelayedQueue.this.poll();
-
-            if (item.getData() != null
-            		&& item.getData().getClass().isAssignableFrom(Runnable.class)) {
-
-            	Runnable runnableOnTime = () -> {
-            		DelayedQueue.this.mOnTimeListener.onTime(item);
-
-                    LOGGER.debug("Consumed (" + item + ")");
-            	};
-
-            	Thread threadOnTime = new Thread(runnableOnTime);
-            	threadOnTime.start();
-
-            } else {
-            	DelayedQueue.this.mOnTimeListener.onTime(item);
-
-                LOGGER.debug("Consumed (" + item + ")");
-            }
-
-        } finally {
-            lock.unlock();
-        }
-
-	}
 }
