@@ -2,7 +2,12 @@ package com.neptune.queue;
 
 import java.util.LinkedList;
 import java.util.List;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 import junit.framework.TestCase;
 
@@ -170,5 +175,25 @@ public class DelayedQueueTest extends TestCase {
         assertEquals("Wrong size based on List after removed",
                 addList.size() - 5, queue.size());
 
+    }
+    
+    ScheduledExecutorService service = Executors.newScheduledThreadPool(1);
+	ScheduledFuture<Integer> f;
+	Callable<Integer> consumer = new Callable<Integer>() {
+		public Integer call() {
+			System.out.println("called!");
+			f = service.schedule(consumer, 1000, TimeUnit.MILLISECONDS);
+			return 10;
+		}
+	};
+
+    @Test
+    public void test_future() throws InterruptedException, ExecutionException {
+    	
+    	f = service.schedule(consumer, 1000, TimeUnit.MILLISECONDS);
+    	
+    	System.out.println("result is " + f.get());
+    	System.out.println("result is " + f.get());
+    	System.out.println("result is " + f.get());
     }
 }
