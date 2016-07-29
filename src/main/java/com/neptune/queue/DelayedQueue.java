@@ -1,11 +1,14 @@
 package com.neptune.queue;
 
 import java.util.Collection;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -28,7 +31,7 @@ import org.joda.time.DateTimeUtils;
  * threads and not in the main. The Data Thread are threads that can be created
  * if the object Data D implements runnable, and can be executed when the item
  * is consumed.
- * 
+ * FIXME: Remove implementations that just wrappers super methods
  * @author Rafael
  *
  * @param <I>
@@ -74,10 +77,10 @@ public final class DelayedQueue<I, D>
     /**
      * Executor that runs this Delayed Queue.
      */
-    private ScheduledExecutorService executor;
+    private ScheduledExecutorService scheduler;
 
     /**
-     * The Future representation of the Consumer
+     * The Future representation of the Consumer.
      */
     private ScheduledFuture<DelayedItem<I, D>> future;
 
@@ -116,22 +119,56 @@ public final class DelayedQueue<I, D>
     };
 
     /**
-     * "Started" flag
+     * "Started" flag.
      */
     private boolean started;
 
+    private ExecutorService callbacks;
+
+    private ExecutorService runners;
+
+    // FIXME this should be delegated to be client app
+    private Map<Runnable, Future<?>> futures;
+
     /**
-     * Initialize the Queue and its {@link Executor}
+     * Initialize the Queue and its {@link ScheduledExecutorService}.
      */
     public DelayedQueue() {
         super();
+        init(1);
+    }
 
-        executor = Executors.newScheduledThreadPool(1);
+    /**
+     * Initialize the Queue and its {@link ScheduledExecutorService}.
+     * 
+     * @param initialCapacity
+     *            used to define the size of the queue, and also the capacity of
+     *            the ThreadPool for callbacks
+     */
+    public DelayedQueue(int initialCapacity) {
+        super(initialCapacity);
+        init(initialCapacity);
+    }
+
+    /**
+     * Initialize Executors and start thread
+     * 
+     * @param i
+     *            number of threads to the pools
+     */
+    private void init(int i) {
+        scheduler = Executors.newSingleThreadScheduledExecutor(
+                Executors.privilegedThreadFactory());
+
+        callbacks = Executors.newFixedThreadPool(i);
+        runners = Executors.newFixedThreadPool(i);
+
+        futures = new HashMap<Runnable, Future<?>>();
         this.start();
     }
 
     /**
-     * Force a {@link DelayedQueue#reschedule(DelayedItem)}
+     * Force a {@link DelayedQueue#reschedule(DelayedItem)}.
      */
     public void start() {
         LOGGER.info("Starting Delayed Queue");
@@ -142,7 +179,7 @@ public final class DelayedQueue<I, D>
     }
 
     /**
-     * Cancel the {@link DelayedQueue#future} and prevent any reschedule
+     * Cancel the {@link DelayedQueue#future} and prevent any reschedule.
      */
     public void stop() {
         LOGGER.info("Stopping Delayed Queue");
@@ -155,7 +192,7 @@ public final class DelayedQueue<I, D>
      */
     private void cancel() {
         // Does not cancel a future that doesn't exist or a running task
-        if (future != null && future.getDelay(TimeUnit.MILLISECONDS) >= 0) {
+        if (future != null && future.getDelay(TimeUnit.MILLISECONDS) > 0) {
             LOGGER.debug("Consumer registred to "
                     + future.getDelay(TimeUnit.MILLISECONDS) + "ms."
                     + " Canceling it...");
@@ -168,7 +205,7 @@ public final class DelayedQueue<I, D>
     }
 
     /**
-     * Reschedule the {@link DelayedQueue#executor} with a "new" consumer.
+     * Reschedule the {@link DelayedQueue#scheduler} with a "new" consumer.
      * 
      * @param item
      *            element that needs to be rescheduled!
@@ -197,7 +234,7 @@ public final class DelayedQueue<I, D>
             LOGGER.info("Scheduling element (" + item + ")" + " to "
                     + waitingTime + "ms");
 
-            future = executor.schedule(consumer, waitingTime,
+            future = scheduler.schedule(consumer, waitingTime,
                     TimeUnit.MILLISECONDS);
 
         } else {
@@ -236,34 +273,52 @@ public final class DelayedQueue<I, D>
                 && item.getData().getClass().isAssignableFrom(Runnable.class)) {
             LOGGER.info("Running 'data' because it is runnable!");
 
-            Runnable runnableData = (Runnable) item.getData();
-
-            Thread threadData = new Thread(runnableData);
-            threadData.start();
+            runners.execute((Runnable) item.getData());
         }
 
-        //FIXME this guy is taking too long to run.
-        // Maybe use a Executor?
-//        Runnable runnableOnTime = () -> {
+        Runnable run = () -> {
             DelayedQueue.this.mOnTimeListener.onTime(item);
             LOGGER.debug(item + " consumed");
-//        };
-
-//        Thread threadOnTime = new Thread(runnableOnTime);
-//        threadOnTime.start();
+            futures.remove(this);
+        };
+        futures.put(run, callbacks.submit(run));
     }
 
     /**
-     * Get the item, waiting for its timeout to happen
-     * 
-     * @return the head element, null if it is not available or if error.
-     * @throws InterruptedException
-     *             if the consumer thread is interrupted (probably never)
-     * @throws ExecutionException
-     *             if the consumer thread fired an exception
+     * Wait until all callback have executed. FIXME: This should be
+     * reimplemented with different meaning
      */
-    public DelayedItem<I, D> get()
-            throws InterruptedException, ExecutionException {
+    public void stay() {
+        // Lock the queue because the Map could be edited
+        // with more runnables otherwise
+        lock.lock();
+        LOGGER.trace("stay() {");
+
+        try {
+            for (Runnable r : futures.keySet()) {
+                futures.get(r).get();
+            }
+        } catch (InterruptedException e) {
+            LOGGER.error("Future was interrupted!", e);
+        } catch (ExecutionException e) {
+            LOGGER.error("Execution had an error!", e);
+        } catch (CancellationException e) {
+            LOGGER.debug("Future was canceled");
+        } finally {
+            lock.unlock();
+        }
+
+        LOGGER.trace("stay() }");
+    }
+
+    /**
+     * Get the item, waiting for its timeout to happen.
+     *
+     * @return the head element, null if it is not available or if error.
+     * @throws CancellationException
+     *             if the current head element was replaced
+     */
+    public DelayedItem<I, D> get() throws CancellationException {
         LOGGER.trace("get() {");
 
         try {
@@ -273,7 +328,10 @@ public final class DelayedQueue<I, D>
             } else {
                 return future.get();
             }
-        } catch (CancellationException e) {
+        } catch (InterruptedException e) {
+            LOGGER.debug("Current element cancelled");
+            return null;
+        } catch (ExecutionException e) {
             LOGGER.debug("Current element cancelled");
             return null;
         } finally {

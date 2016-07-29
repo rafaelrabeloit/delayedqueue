@@ -3,7 +3,6 @@ package com.neptune.queue;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
-import junit.framework.TestCase;
 
 import org.joda.time.DateTime;
 import org.junit.After;
@@ -11,6 +10,8 @@ import org.junit.Before;
 import org.junit.Test;
 
 import com.neptune.queue.DelayedQueue.OnTimeListener;
+
+import junit.framework.TestCase;
 
 public class DelayedQueueTest extends TestCase {
 
@@ -71,7 +72,9 @@ public class DelayedQueueTest extends TestCase {
                 DateTime.now().plus(10).getMillis()));
         queue.add(new DelayedItem<Object, Object>(
                 DateTime.now().plus(11).getMillis()));
-        Thread.sleep(12);
+
+        queue.get();
+        queue.stay();
 
         assertNotNull("Element was mistakenly removed with stopped timer",
                 queue.peek());
@@ -87,7 +90,9 @@ public class DelayedQueueTest extends TestCase {
         // Start again to check if the elements are consumed
         queue.start();
 
-        Thread.sleep(10);
+        queue.get();
+        queue.get();
+        queue.stay();
 
         assertNull("Failed to remove the elements", queue.peek());
         assertEquals("All element should fire", 3, callCount);
@@ -99,7 +104,9 @@ public class DelayedQueueTest extends TestCase {
         DelayedItem<Object, Object> ontime = new DelayedItem<Object, Object>(
                 DateTime.now().plusSeconds(1).getMillis(), 1L);
         queue.add(ontime);
-        Thread.sleep(1010);
+
+        queue.get();
+        queue.stay();
 
         assertNull("Failed to remove the element", queue.peek());
         assertEquals("Listener method was not called", 1, callCount);
@@ -109,7 +116,10 @@ public class DelayedQueueTest extends TestCase {
         DelayedItem<Object, Object> late = new DelayedItem<Object, Object>(
                 DateTime.now().minusSeconds(1).getMillis(), 2L);
         queue.add(late);
-        Thread.sleep(20);
+
+        queue.get();
+        queue.stay();
+
         assertEquals("Listener not fired when add an already passed time", 2,
                 callCount);
         assertEquals("The right element was not passed to the listener", late,
@@ -142,7 +152,8 @@ public class DelayedQueueTest extends TestCase {
                 addList.size() - 1, queue.size());
 
         queue.get();
-//        Thread.sleep(100);
+        queue.stay();
+
         assertEquals("Listener method was not called the right amount of times",
                 1, callCount);
         assertEquals("The right element was not passed to the listener",
@@ -153,7 +164,8 @@ public class DelayedQueueTest extends TestCase {
                 addList.size() - 3, queue.size());
 
         queue.get();
-//        Thread.sleep(100);
+        queue.stay();
+
         assertEquals("Listener method was not called the right amount of times",
                 2, callCount);
         assertEquals("The right element was not passed to the listener",
@@ -166,5 +178,10 @@ public class DelayedQueueTest extends TestCase {
         assertEquals("Wrong size based on List after removed",
                 addList.size() - 5, queue.size());
 
+    }
+
+    @Test
+    public void test_timeChecker() throws InterruptedException {
+        //FIXME implement tests for timing!
     }
 }
