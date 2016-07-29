@@ -2,17 +2,10 @@ package com.neptune.queue;
 
 import java.util.LinkedList;
 import java.util.List;
-import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
-
 import junit.framework.TestCase;
 
 import org.joda.time.DateTime;
-import org.joda.time.DateTimeUtils;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -139,7 +132,6 @@ public class DelayedQueueTest extends TestCase {
         // This process is kind of slow...
         queue.addAll(addList);
 
-        System.out.println("1");
         assertTrue("Removing the first item from the queue failed",
                 queue.remove(addList.get(0)));
         assertFalse("The right element was removed",
@@ -149,20 +141,19 @@ public class DelayedQueueTest extends TestCase {
         assertEquals("Wrong size based on List after removed",
                 addList.size() - 1, queue.size());
 
-        System.out.println("2");
         queue.get();
-        System.out.println("3");
+        Thread.sleep(100);
         assertEquals("Listener method was not called the right amount of times",
                 1, callCount);
         assertEquals("The right element was not passed to the listener",
                 addList.get(1), result);
 
-        System.out.println("4");
         assertEquals("Polled element failed", addList.get(2), queue.poll());
         assertEquals("Wrong size based on List after removed",
                 addList.size() - 3, queue.size());
 
         queue.get();
+        Thread.sleep(100);
         assertEquals("Listener method was not called the right amount of times",
                 2, callCount);
         assertEquals("The right element was not passed to the listener",
@@ -175,25 +166,5 @@ public class DelayedQueueTest extends TestCase {
         assertEquals("Wrong size based on List after removed",
                 addList.size() - 5, queue.size());
 
-    }
-    
-    ScheduledExecutorService service = Executors.newScheduledThreadPool(1);
-	ScheduledFuture<Integer> f;
-	Callable<Integer> consumer = new Callable<Integer>() {
-		public Integer call() {
-			System.out.println("called!");
-			f = service.schedule(consumer, 1000, TimeUnit.MILLISECONDS);
-			return 10;
-		}
-	};
-
-    @Test
-    public void test_future() throws InterruptedException, ExecutionException {
-    	
-    	f = service.schedule(consumer, 1000, TimeUnit.MILLISECONDS);
-    	
-    	System.out.println("result is " + f.get());
-    	System.out.println("result is " + f.get());
-    	System.out.println("result is " + f.get());
     }
 }

@@ -4,6 +4,7 @@ import java.util.Collection;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
@@ -91,17 +92,16 @@ public final class DelayedQueue<I, D>
     private Callable<DelayedItem<I, D>> consumer = new Callable<DelayedItem<I, D>>() {
 
         /**
-         * Remove the queue's head and fire the {@link OnTimeListener#onTime}
-         * event.
+         * Remove the queue's head and fire the
+         * {@link DelayedQueue#consume(DelayedItem)} method.
          * 
-         * @see OnTimeListener#onTime
+         * @return The element that was pulled.
          */
         public DelayedItem<I, D> call() {
-            LOGGER.trace("call() {");
             lock.lock();
+            LOGGER.trace("call() {");
 
             try {
-
                 DelayedItem<I, D> item = DelayedQueue.this.poll();
                 LOGGER.debug("Consuming (" + item + ")");
 
@@ -116,12 +116,12 @@ public final class DelayedQueue<I, D>
     };
 
     /**
-     * Consuming Thread(s) state.
+     * "Started" flag
      */
     private boolean started;
 
     /**
-     * Initialize the Queue with an Executor and a Thread Timer in it.
+     * Initialize the Queue and its {@link Executor}
      */
     public DelayedQueue() {
         super();
@@ -131,76 +131,80 @@ public final class DelayedQueue<I, D>
     }
 
     /**
-     * Start the thread executor, and the thread itself.
+     * Force a {@link DelayedQueue#reschedule(DelayedItem)}
      */
     public void start() {
         LOGGER.info("Starting Delayed Queue");
         if (!started) {
             started = true;
-            reschedule();
+            reschedule(peek());
         }
     }
 
     /**
-     * Shutdown the thread executor, and the thread by consequence, by
-     * interrupting it.
+     * Cancel the {@link DelayedQueue#future} and prevent any reschedule
      */
     public void stop() {
         LOGGER.info("Stopping Delayed Queue");
         started = false;
-        interrupt();
+        cancel();
     }
 
     /**
-     * Interrupt a waiting thread and wait for it to finish.
+     * Cancel the {@link DelayedQueue#future}
      */
-    private void interrupt() {
-        // Does not cancel a running task
-        if (future != null && future.getDelay(TimeUnit.MILLISECONDS) <= 0) {
-            LOGGER.debug("Consumer registred, interrupting it...");
+    private void cancel() {
+        // Does not cancel a future that doesn't exist or a running task
+        if (future != null && future.getDelay(TimeUnit.MILLISECONDS) >= 0) {
+            LOGGER.debug("Consumer registred to "
+                    + future.getDelay(TimeUnit.MILLISECONDS) + "ms."
+                    + " Canceling it...");
+
             future.cancel(false);
+        } else {
+            LOGGER.debug("Skipping cancelation because "
+                    + "future doesnt exist or is being processed now");
         }
     }
 
     /**
-     * Reschedule the queue thread.
+     * Reschedule the {@link DelayedQueue#executor} with a "new" consumer.
+     * 
+     * @param item
+     *            element that needs to be rescheduled!
+     * @see DelayedQueue#consumer
      */
-    private void reschedule() {
+    private void reschedule(final DelayedItem<I, D> item) {
         LOGGER.trace("reschedule() {");
-        
+
         if (!started) {
             return;
         }
 
-        lock.lock();
+        cancel();
 
-        try {
-            interrupt();
+        if (item != null) {
+            // Calculate the waiting time for the head
+            long waitingTime = item.getTime()
+                    - DateTimeUtils.currentTimeMillis();
 
-            if (peek() != null) {
-                // Calculate the waiting time for the HEAD
-                long waitingTime = peek().getTime()
-                        - DateTimeUtils.currentTimeMillis();
-
-                if (waitingTime < 0) {
-                    LOGGER.info("Negative time! Was the Queue stopped? "
-                            + "Setting time to NOW.");
-                    waitingTime = 0;
-                }
-
-                LOGGER.info("Scheduling element (" + peek() + ")" + " to "
-                        + waitingTime + " ms");
-
-                future = executor.schedule(consumer, waitingTime,
-                        TimeUnit.MILLISECONDS);
-
-            } else {
-                LOGGER.info("Empty Queue");
+            if (waitingTime < 0) {
+                LOGGER.info("Negative time! Was the Queue stopped? "
+                        + "Setting time to NOW.");
+                waitingTime = 0;
             }
-        } finally {
-            lock.unlock();
-            LOGGER.trace("reschedule() }");
+
+            LOGGER.info("Scheduling element (" + item + ")" + " to "
+                    + waitingTime + "ms");
+
+            future = executor.schedule(consumer, waitingTime,
+                    TimeUnit.MILLISECONDS);
+
+        } else {
+            LOGGER.info("Empty Queue");
         }
+
+        LOGGER.trace("reschedule() }");
     }
 
     /**
@@ -225,10 +229,12 @@ public final class DelayedQueue<I, D>
      * call. Also, if the Data element implements Runnable, runs it.
      * 
      * @param item
+     *            The item that has been consumed
      */
-    private void consume(DelayedItem<I, D> item) {
+    private void consume(final DelayedItem<I, D> item) {
         if (item.getData() != null
                 && item.getData().getClass().isAssignableFrom(Runnable.class)) {
+            LOGGER.info("Running 'data' because it is runnable!");
 
             Runnable runnableData = (Runnable) item.getData();
 
@@ -239,7 +245,7 @@ public final class DelayedQueue<I, D>
 
         Runnable runnableOnTime = () -> {
             DelayedQueue.this.mOnTimeListener.onTime(item);
-            LOGGER.debug("Consumed");
+            LOGGER.debug(item + " consumed");
         };
 
         Thread threadOnTime = new Thread(runnableOnTime);
@@ -248,36 +254,35 @@ public final class DelayedQueue<I, D>
 
     /**
      * Get the item, waiting for its timeout to happen
+     * 
      * @return the head element, null if it is not available or if error.
-     * @throws InterruptedException if the consumer thread is 
-     *         interrupted (probably never)
-     * @throws ExecutionException if the consumer thread fired an exception
+     * @throws InterruptedException
+     *             if the consumer thread is interrupted (probably never)
+     * @throws ExecutionException
+     *             if the consumer thread fired an exception
      */
     public DelayedItem<I, D> get()
             throws InterruptedException, ExecutionException {
         LOGGER.trace("get() {");
+
         try {
-//            if (future == null) {
-//                return null;
-//            } else {
-//                return future.get();
-//            }
-            ScheduledFuture<DelayedItem<I, D>> future = this.future;
-            while(!future.isDone()) {
-                Thread.sleep(10);
-                LOGGER.debug("Timing is " + future.getDelay(TimeUnit.MILLISECONDS));
+            if (future == null) {
+                LOGGER.debug("Future is null");
+                return null;
+            } else {
+                return future.get();
             }
-            return null;
         } catch (CancellationException e) {
+            LOGGER.debug("Current element cancelled");
             return null;
         } finally {
             LOGGER.trace("get() }");
         }
-        
+
     }
 
     /**
-     * Depends on offer() implementation.
+     * Depends on {@link DelayedQueue#offer(DelayedItem)} implementation.
      */
     @Override
     public void put(final DelayedItem<I, D> e) {
@@ -285,7 +290,7 @@ public final class DelayedQueue<I, D>
     }
 
     /**
-     * Depends on offer() implementation.
+     * Depends on {@link DelayedQueue#offer(DelayedItem)} implementation.
      */
     @Override
     public boolean add(final DelayedItem<I, D> e) {
@@ -293,7 +298,7 @@ public final class DelayedQueue<I, D>
     }
 
     /**
-     * Depends on offer() implementation.
+     * Depends on {@link DelayedQueue#offer(DelayedItem)} implementation.
      */
     @Override
     public boolean addAll(final Collection<? extends DelayedItem<I, D>> c) {
@@ -301,7 +306,7 @@ public final class DelayedQueue<I, D>
     }
 
     /**
-     * Depends on offer() implementation.
+     * Depends on {@link DelayedQueue#offer(DelayedItem)} implementation.
      */
     @Override
     public boolean offer(final DelayedItem<I, D> e, final long timeout,
@@ -309,31 +314,34 @@ public final class DelayedQueue<I, D>
         return super.offer(e, timeout, unit);
     }
 
+    /**
+     * Basically all insertions depends on this method.
+     */
     @Override
     public boolean offer(final DelayedItem<I, D> e) {
-
+        // super value
         boolean returned = false;
 
+        // locking
         lock.lock();
 
         try {
-
             // If the time has passed already,
             // doesn't even add to the queue
             if (e.getTime() < DateTimeUtils.currentTimeMillis() && started) {
-                LOGGER.debug("Consuming Early");
+                LOGGER.debug("Consuming " + e + " early");
                 consume(e);
-
-                return true;
+                returned = true;
             } else {
-
+                // calling super
                 returned = super.offer(e);
 
+                // if it is necessary...
                 if (returned && peek() == e) {
-                    reschedule();
+                    // reschedule
+                    reschedule(peek());
                 }
             }
-
         } finally {
             lock.unlock();
         }
@@ -342,7 +350,7 @@ public final class DelayedQueue<I, D>
     }
 
     /**
-     * Depends on poll() implementation.
+     * Depends on {@link DelayedQueue#poll()} implementation.
      */
     @Override
     public DelayedItem<I, D> remove() {
@@ -351,19 +359,26 @@ public final class DelayedQueue<I, D>
 
     @Override
     public boolean remove(final Object o) {
-
+        // super value
         boolean returned = false;
+
+        // flag to check if the head is affected
         boolean shouldNotify = false;
 
+        // locking
         lock.lock();
 
         try {
-
+            // check if the head will be affected
             shouldNotify = o.equals(peek());
+
+            // calling super
             returned = super.remove(o);
 
+            // if it is necessary...
             if (returned && shouldNotify) {
-                reschedule();
+                // reschedule
+                reschedule(peek());
             }
 
         } finally {
@@ -376,18 +391,21 @@ public final class DelayedQueue<I, D>
     @Override
     public DelayedItem<I, D> poll(final long timeout, final TimeUnit unit)
             throws InterruptedException {
-
+        // super value
         DelayedItem<I, D> returned;
 
+        // locking
         lock.lock();
 
         try {
+            // calling super
             returned = super.poll(timeout, unit);
 
+            // if it is necessary...
             if (returned != null) {
-                reschedule();
+                // reschedule
+                reschedule(peek());
             }
-
         } finally {
             lock.unlock();
         }
@@ -397,17 +415,20 @@ public final class DelayedQueue<I, D>
 
     @Override
     public DelayedItem<I, D> poll() {
-
+        // super value
         DelayedItem<I, D> returned;
 
+        // locking
         lock.lock();
 
         try {
-
+            // calling super
             returned = super.poll();
 
+            // if it is necessary...
             if (returned != null) {
-                reschedule();
+                // reschedule
+                reschedule(peek());
             }
 
         } finally {
@@ -419,17 +440,20 @@ public final class DelayedQueue<I, D>
 
     @Override
     public DelayedItem<I, D> take() throws InterruptedException {
-
+        // super value
         DelayedItem<I, D> returned;
 
+        // locking
         lock.lock();
 
         try {
-
+            // calling super
             returned = super.take();
 
+            // if it is necessary...
             if (returned != null) {
-                reschedule();
+                // reschedule
+                reschedule(peek());
             }
 
         } finally {
@@ -441,50 +465,62 @@ public final class DelayedQueue<I, D>
 
     @Override
     public boolean removeAll(final Collection<?> c) {
-
+        // super value
         boolean returned = false;
+
+        // flag to check if the head is affected
         boolean shouldNotify = false;
 
+        // locking
         lock.lock();
 
         try {
-
+            // check if the head will be affected
             shouldNotify = c.contains(peek());
+
+            // calling super
             returned = super.removeAll(c);
 
             if (returned && shouldNotify) {
-                reschedule();
+                // reschedule
+                reschedule(peek());
             }
 
+            return returned;
         } finally {
             lock.unlock();
         }
-
-        return returned;
     }
 
     @Override
     public boolean retainAll(final Collection<?> c) {
-
+        // super value
         boolean returned = false;
+
+        // flag to check if the head is affected
         boolean shouldNotify = false;
 
+        // locking
         lock.lock();
 
         try {
-
+            // check if the head will be affected
             shouldNotify = !c.contains(peek());
+
+            // calling super
             returned = super.retainAll(c);
 
+            // if it is necessary...
             if (returned && shouldNotify) {
-                reschedule();
+                // reschedule
+                reschedule(peek());
             }
 
+            return returned;
         } finally {
             lock.unlock();
         }
 
-        return returned;
     }
 
     /**
@@ -498,19 +534,21 @@ public final class DelayedQueue<I, D>
     @Override
     public int drainTo(final Collection<? super DelayedItem<I, D>> c,
             final int maxElements) {
-
+        // super value
         int returned;
 
+        // locking
         lock.lock();
 
         try {
-
+            // calling super
             returned = super.drainTo(c, maxElements);
 
+            // if it is necessary...
             if (returned > 0) {
-                reschedule();
+                // reschedule
+                reschedule(peek());
             }
-
         } finally {
             lock.unlock();
         }
@@ -520,15 +558,15 @@ public final class DelayedQueue<I, D>
 
     @Override
     public void clear() {
-
+        // locking
         lock.lock();
 
         try {
-
+            // calling super
             super.clear();
 
-            reschedule();
-
+            // reschedule
+            reschedule(null);
         } finally {
             lock.unlock();
         }
