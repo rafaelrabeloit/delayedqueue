@@ -240,16 +240,17 @@ public final class DelayedQueue<I, D>
 
             Thread threadData = new Thread(runnableData);
             threadData.start();
-
         }
 
-        Runnable runnableOnTime = () -> {
+        //FIXME this guy is taking too long to run.
+        // Maybe use a Executor?
+//        Runnable runnableOnTime = () -> {
             DelayedQueue.this.mOnTimeListener.onTime(item);
             LOGGER.debug(item + " consumed");
-        };
+//        };
 
-        Thread threadOnTime = new Thread(runnableOnTime);
-        threadOnTime.start();
+//        Thread threadOnTime = new Thread(runnableOnTime);
+//        threadOnTime.start();
     }
 
     /**

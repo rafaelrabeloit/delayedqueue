@@ -142,7 +142,7 @@ public class DelayedQueueTest extends TestCase {
                 addList.size() - 1, queue.size());
 
         queue.get();
-        Thread.sleep(100);
+//        Thread.sleep(100);
         assertEquals("Listener method was not called the right amount of times",
                 1, callCount);
         assertEquals("The right element was not passed to the listener",
@@ -153,7 +153,7 @@ public class DelayedQueueTest extends TestCase {
                 addList.size() - 3, queue.size());
 
         queue.get();
-        Thread.sleep(100);
+//        Thread.sleep(100);
         assertEquals("Listener method was not called the right amount of times",
                 2, callCount);
         assertEquals("The right element was not passed to the listener",
