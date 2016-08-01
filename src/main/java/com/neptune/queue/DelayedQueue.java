@@ -1,15 +1,12 @@
 package com.neptune.queue;
 
 import java.util.Collection;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.Delayed;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -120,12 +117,18 @@ public final class DelayedQueue<E extends Delayed>
      */
     private boolean started;
 
+    /**
+     * Executor for callback threads.
+     * Callback have their own thread because the scheduler thread cannot stop
+     */
     private ExecutorService callbacks;
 
+    /**
+     * Executor for item threads.
+     * If item also implement a Runnable, then it will execute in this executor
+     * when is consumed.
+     */
     private ExecutorService runners;
-
-    // FIXME this should be delegated to be client app
-    private Map<Runnable, Future<?>> futures;
 
     /**
      * Initialize the Queue and its {@link ScheduledExecutorService}.
@@ -152,7 +155,6 @@ public final class DelayedQueue<E extends Delayed>
         this.callbacks = Executors.newFixedThreadPool(initialCapacity);
         this.runners = Executors.newFixedThreadPool(initialCapacity);
 
-        this.futures = new HashMap<Runnable, Future<?>>();
         this.start();
     }
 
@@ -270,35 +272,28 @@ public final class DelayedQueue<E extends Delayed>
 
         Runnable run = () -> {
             DelayedQueue.this.mOnTimeListener.onTime(item);
-            DelayedQueue.this.futures.remove(this);
             LOGGER.debug(item + " consumed");
         };
-        this.futures.put(run, callbacks.submit(run));
+        callbacks.submit(run);
     }
 
     /**
-     * Wait until all callback have executed. FIXME: This should be
-     * reimplemented with different meaning
+     * Wait until all elements are processed.
      */
     public void stay() {
-        // Lock the queue because the Map could be edited
-        // with more runnables otherwise
-        // final ReentrantLock lock = this.lock;
-        // lock.lock();
         LOGGER.trace("stay() {");
 
-        try {
-            for (Runnable r : this.futures.keySet()) {
-                this.futures.get(r).get();
+        if (future != null) {
+            while (super.size() > 0 && this.started) {
+                try {
+                    future.get();
+                } catch (CancellationException e) {
+                    LOGGER.debug("Soft Failing at stay() cancellation");
+                } catch (InterruptedException | ExecutionException e) {
+                    LOGGER.error(e);
+                    break;
+                }
             }
-        } catch (InterruptedException e) {
-            LOGGER.error("Future was interrupted!", e);
-        } catch (ExecutionException e) {
-            LOGGER.error("Execution had an error!", e);
-        } catch (CancellationException e) {
-            LOGGER.debug("Future was canceled");
-        } finally {
-            // lock.unlock();
         }
 
         LOGGER.trace("stay() }");
@@ -311,7 +306,7 @@ public final class DelayedQueue<E extends Delayed>
      * @throws CancellationException
      *             if the current head element was replaced
      */
-    public Delayed get() throws CancellationException {
+    public E get() throws CancellationException {
         LOGGER.trace("get() {");
 
         try {
@@ -322,10 +317,10 @@ public final class DelayedQueue<E extends Delayed>
                 return this.future.get();
             }
         } catch (InterruptedException e) {
-            LOGGER.debug("Current element cancelled");
+            LOGGER.error("Current element interrupted");
             return null;
         } catch (ExecutionException e) {
-            LOGGER.debug("Current element cancelled");
+            LOGGER.error("Current element exception");
             return null;
         } finally {
             LOGGER.trace("get() }");

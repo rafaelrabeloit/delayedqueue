@@ -180,6 +180,22 @@ public class DelayedQueueTest extends TestCase {
     }
 
     @Test
+    public void test_stay()
+            throws InterruptedException, ExecutionException {
+
+        queue.add(new DelayedTest(
+                DateTime.now().plusMillis(100).getMillis()));
+        queue.add(new DelayedTest(
+                DateTime.now().plusMillis(200).getMillis()));
+        queue.add(new DelayedTest(
+                DateTime.now().plusMillis(250).getMillis()));
+        
+        queue.stay();
+
+        assertEquals("Wrong size after stay", 0, queue.size());
+    }
+
+    @Test
     public void test_simpleRemoves()
             throws InterruptedException, ExecutionException {
         // This process is kind of slow...
