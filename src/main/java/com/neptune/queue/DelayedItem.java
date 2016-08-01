@@ -1,5 +1,10 @@
 package com.neptune.queue;
 
+import static java.util.concurrent.TimeUnit.NANOSECONDS;
+
+import java.util.concurrent.Delayed;
+import java.util.concurrent.TimeUnit;
+
 import javax.validation.constraints.NotNull;
 
 /**
@@ -9,14 +14,14 @@ import javax.validation.constraints.NotNull;
  * @param <I> The type for Id
  * @param <D> The type for Data
  */
-public class DelayedItem<I, D> implements Comparable<DelayedItem<I, D>> {
+public class DelayedItem<I, D> implements Delayed {
 
     /**
      * "Future" timestamp to when this item should fire.
      * If not set, is supposed {@link Integer#MAX_VALUE} or
      * the End of Times.
      */
-    private Long mTime;
+    private long delay;
 
     /**
      * The data associated with this item.
@@ -32,20 +37,20 @@ public class DelayedItem<I, D> implements Comparable<DelayedItem<I, D>> {
 
     /**
      * Basic constructor method.
-     * @param time timestamp for when this element should fire. Can't be null
+     * @param delay timestamp for when this element should fire. Can't be null
      * @param id the identifier for this element
      * @param data the data for this element
      */
     public DelayedItem(@NotNull final Long time, final I id, final D data) {
         super();
-        this.mTime = time;
+        this.delay = time;
         this.mData = data;
         this.mId = id;
     }
 
     /**
      * Constructor without data.
-     * @param time timestamp for when this element should fire. Can't be null
+     * @param delay timestamp for when this element should fire. Can't be null
      * @param id the identifier for this element
      */
     public DelayedItem(@NotNull final Long time, final I id) {
@@ -54,14 +59,14 @@ public class DelayedItem<I, D> implements Comparable<DelayedItem<I, D>> {
 
     /**
      * Constructor without data and id.
-     * @param time timestamp for when this element should fire. Can't be null
+     * @param delay timestamp for when this element should fire. Can't be null
      */
     public DelayedItem(@NotNull final Long time) {
         this(time, null, null);
     }
 
     /**
-     * Constructor without data and time.
+     * Constructor without data and delay.
      * Time is supposed to be "End of Times"
      * @param id element identifier
      */
@@ -71,10 +76,10 @@ public class DelayedItem<I, D> implements Comparable<DelayedItem<I, D>> {
 
     /**
      * Timestamp for this item.
-     * @return time
+     * @return delay
      */
-    public final Long getTime() {
-        return mTime;
+    public final long getDelay(TimeUnit unit) {
+        return delay;
     }
 
     /**
@@ -96,8 +101,12 @@ public class DelayedItem<I, D> implements Comparable<DelayedItem<I, D>> {
     }
 
     @Override
-    public final int compareTo(final DelayedItem<I, D> o) {
-        return this.getTime().compareTo(o.getTime());
+    public final int compareTo(final Delayed other) {
+        if (other == this) {
+            return 0;
+        }
+        long diff = this.getDelay(NANOSECONDS) - other.getDelay(NANOSECONDS);
+        return (diff < 0) ? -1 : (diff > 0) ? 1 : 0;
     }
 
     @Override
@@ -139,7 +148,7 @@ public class DelayedItem<I, D> implements Comparable<DelayedItem<I, D>> {
     @Override
     public final String toString() {
         return "DelayedItem ["
-                + "time=" + mTime
+                + "delay=" + delay
                 + ", data=" + mData
                 + ", id=" + mId
                 + "]";

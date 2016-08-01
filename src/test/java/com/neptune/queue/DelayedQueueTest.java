@@ -1,8 +1,14 @@
 package com.neptune.queue;
 
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+
 import java.util.LinkedList;
 import java.util.List;
+import java.util.concurrent.Delayed;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import org.joda.time.DateTime;
 import org.junit.After;
@@ -15,24 +21,51 @@ import junit.framework.TestCase;
 
 public class DelayedQueueTest extends TestCase {
 
+    class DelayedTest implements Delayed {
+
+        public DelayedTest(long delay) {
+            super();
+            this.delay = delay;
+        }
+
+        private long delay;
+
+        @Override
+        public int compareTo(Delayed o) {
+            if (o == this) {
+                return 0;
+            }
+            long diff = this.getDelay(MILLISECONDS) - o.getDelay(MILLISECONDS);
+            return (diff < 0) ? -1 : (diff > 0) ? 1 : 0;
+        }
+
+        @Override
+        public long getDelay(TimeUnit unit) {
+            return unit.convert(delay - System.currentTimeMillis(),
+                    MILLISECONDS);
+        }
+
+    }
+
     int callCount = 0;
+    Executor service = Executors.newSingleThreadExecutor();
 
     // Helper lists
-    List<DelayedItem<Object, Object>> addList = new LinkedList<>();
-    List<DelayedItem<Object, Object>> removeList = new LinkedList<>();
-    List<DelayedItem<Object, Object>> retainList = new LinkedList<>();
+    List<Delayed> addList = new LinkedList<>();
+    List<Delayed> removeList = new LinkedList<>();
+    List<Delayed> retainList = new LinkedList<>();
 
-    DelayedItem<Object, Object> result;
+    Delayed result;
 
-    OnTimeListener<Object, Object> listener = new OnTimeListener<Object, Object>() {
+    OnTimeListener<Delayed> listener = new OnTimeListener<Delayed>() {
         @Override
-        public void onTime(DelayedItem<Object, Object> e) {
+        public void onTime(Delayed e) {
             callCount++;
             result = e;
         }
     };
 
-    private DelayedQueue<Object, Object> queue;
+    private DelayedQueue<Delayed> queue;
 
     public DelayedQueueTest() {
     }
@@ -41,13 +74,12 @@ public class DelayedQueueTest extends TestCase {
     public void setUp() throws Exception {
         callCount = 0;
         result = null;
-        queue = new DelayedQueue<Object, Object>();
+        queue = new DelayedQueue<Delayed>();
         queue.setOnTimeListener(listener);
 
         for (int i = 0; i < 10; i++) {
-            addList.add(new DelayedItem<Object, Object>(
-                    DateTime.now().plus((i + 1) * 500 + 1000).getMillis(),
-                    new Integer(i)));
+            addList.add(new DelayedTest(
+                    DateTime.now().plus((i + 1) * 500 + 1000).getMillis()));
         }
 
         removeList.addAll(addList.subList(0, 4));
@@ -68,21 +100,15 @@ public class DelayedQueueTest extends TestCase {
         // Tests with the Queue stopped
         queue.stop();
 
-        queue.add(new DelayedItem<Object, Object>(
-                DateTime.now().plus(10).getMillis()));
-        queue.add(new DelayedItem<Object, Object>(
-                DateTime.now().plus(11).getMillis()));
-
-        queue.get();
-        queue.stay();
+        queue.add(new DelayedTest(DateTime.now().plus(10).getMillis()));
+        queue.add(new DelayedTest(DateTime.now().plus(11).getMillis()));
 
         assertNotNull("Element was mistakenly removed with stopped timer",
                 queue.peek());
         assertEquals("Listener method was called with timer stopped", 0,
                 callCount);
 
-        queue.add(new DelayedItem<Object, Object>(
-                DateTime.now().minusSeconds(1).getMillis()));
+        queue.add(new DelayedTest(DateTime.now().minusSeconds(1).getMillis()));
         assertEquals(
                 "Listener method was called with timer stopped with passed time",
                 0, callCount);
@@ -90,6 +116,7 @@ public class DelayedQueueTest extends TestCase {
         // Start again to check if the elements are consumed
         queue.start();
 
+        queue.get();
         queue.get();
         queue.get();
         queue.stay();
@@ -101,8 +128,8 @@ public class DelayedQueueTest extends TestCase {
     @Test
     public void test_simpleAdds() throws InterruptedException {
 
-        DelayedItem<Object, Object> ontime = new DelayedItem<Object, Object>(
-                DateTime.now().plusSeconds(1).getMillis(), 1L);
+        DelayedTest ontime = new DelayedTest(
+                DateTime.now().plusSeconds(1).getMillis());
         queue.add(ontime);
 
         queue.get();
@@ -113,8 +140,8 @@ public class DelayedQueueTest extends TestCase {
         assertEquals("The right element was not passed to the listener", ontime,
                 result);
 
-        DelayedItem<Object, Object> late = new DelayedItem<Object, Object>(
-                DateTime.now().minusSeconds(1).getMillis(), 2L);
+        DelayedTest late = new DelayedTest(
+                DateTime.now().minusSeconds(1).getMillis());
         queue.add(late);
 
         queue.get();
@@ -125,8 +152,8 @@ public class DelayedQueueTest extends TestCase {
         assertEquals("The right element was not passed to the listener", late,
                 result);
 
-        queue.add(new DelayedItem<Object, Object>(Long.MAX_VALUE));
-        queue.add(new DelayedItem<Object, Object>(Long.MAX_VALUE));
+        queue.add(new DelayedTest(Long.MAX_VALUE));
+        queue.add(new DelayedTest(Long.MAX_VALUE));
         assertTrue("Wrong size", queue.size() == 2);
     }
 
@@ -182,6 +209,19 @@ public class DelayedQueueTest extends TestCase {
 
     @Test
     public void test_timeChecker() throws InterruptedException {
-        //FIXME implement tests for timing!
+        // FIXME implement tests for timing!
+    }
+
+    @Test
+    public void test_raceConditionChecking() throws InterruptedException {
+
+        service.execute(() -> {
+            try {
+                Thread.sleep(100);
+                queue.add(addList.get(0));
+            } catch (InterruptedException e) {
+            }
+        });
+        assertEquals("Dead Locking", addList.get(0), queue.take());
     }
 }
