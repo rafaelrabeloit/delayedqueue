@@ -20,8 +20,8 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 /**
- * Delayed Queue collection class. It is a blocking queue {@link DelayedItem}
- * should be used as item, because it ensures timing and id.
+ * Delayed Queue collection class. It is a blocking queue {@link Delayed} should
+ * be used as item, because it ensures timing.
  *
  * There are 3 thread systems running for each instance of this class. The
  * Consumer thread is a single instance thread that is scheduled when an element
@@ -33,12 +33,9 @@ import org.apache.logging.log4j.Logger;
  * 
  * @author Rafael
  *
- * @param <I>
- *            The type for Id
- * @param <D>
- *            The type for Data
+ * @param <E>
+ *            The element type for this queue. Should implement {@link Delayed}
  *
- * @see DelayedItem
  */
 public final class DelayedQueue<E extends Delayed>
         extends PriorityBlockingQueue<E> {
@@ -49,7 +46,7 @@ public final class DelayedQueue<E extends Delayed>
     private static final long serialVersionUID = 1L;
 
     /**
-     * UID serial version.
+     * The time unit used as minimal unit measurable by this scheduler.
      */
     private static final TimeUnit TIMEUNIT = TimeUnit.MILLISECONDS;
 
@@ -100,8 +97,8 @@ public final class DelayedQueue<E extends Delayed>
     private Callable<E> consumer = new Callable<E>() {
 
         /**
-         * Remove the queue's head and fire the
-         * {@link DelayedQueue#consume(DelayedItem)} method.
+         * Remove the queue's head and fire the {@link DelayedQueue#consume(E)}
+         * method.
          * 
          * @return The element that was pulled.
          */
@@ -160,7 +157,7 @@ public final class DelayedQueue<E extends Delayed>
     }
 
     /**
-     * Force a {@link DelayedQueue#reschedule(DelayedItem)}.
+     * Force a {@link DelayedQueue#reschedule(Delayed)}.
      */
     public void start() {
         LOGGER.info("Starting Delayed Queue");
@@ -337,7 +334,7 @@ public final class DelayedQueue<E extends Delayed>
     }
 
     /**
-     * Depends on {@link DelayedQueue#offer(DelayedItem)} implementation.
+     * Depends on {@link DelayedQueue#offer(Delayed)} implementation.
      */
     @Override
     public void put(final E e) {
@@ -345,7 +342,7 @@ public final class DelayedQueue<E extends Delayed>
     }
 
     /**
-     * Depends on {@link DelayedQueue#offer(DelayedItem)} implementation.
+     * Depends on {@link DelayedQueue#offer(Delayed)} implementation.
      */
     @Override
     public boolean add(final E e) {
@@ -353,7 +350,7 @@ public final class DelayedQueue<E extends Delayed>
     }
 
     /**
-     * Depends on {@link DelayedQueue#offer(DelayedItem)} implementation.
+     * Depends on {@link DelayedQueue#offer(Delayed)} implementation.
      */
     @Override
     public boolean addAll(final Collection<? extends E> c) {
@@ -361,7 +358,7 @@ public final class DelayedQueue<E extends Delayed>
     }
 
     /**
-     * Depends on {@link DelayedQueue#offer(DelayedItem)} implementation.
+     * Depends on {@link DelayedQueue#offer(Delayed)} implementation.
      */
     @Override
     public boolean offer(final E e, final long timeout, final TimeUnit unit) {
@@ -563,10 +560,9 @@ public final class DelayedQueue<E extends Delayed>
     /**
      * Interface for Listening on timings.
      *
-     * @param <I>
-     *            The type for Id
-     * @param <D>
-     *            The type for Data
+     * @param <E>
+     *            The element type for this queue. Should implement
+     *            {@link Delayed}
      */
     public interface OnTimeListener<E> {
         /**

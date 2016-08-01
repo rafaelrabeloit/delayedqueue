@@ -47,7 +47,33 @@ public class DelayedQueueTest extends TestCase {
 
     }
 
-    int callCount = 0;
+    class ListenerTest implements OnTimeListener<Delayed> {
+        private int callCount = 0;
+        private int expectedCalls = 0;
+
+        public int getCallCount() {
+            return callCount;
+        }
+
+        public void setExpectedCalls(int expectedCalls) {
+            this.expectedCalls = expectedCalls;
+        }
+
+        @Override
+        public synchronized void onTime(Delayed e) {
+            callCount++;
+            if (callCount == expectedCalls) {
+                notify();
+            }
+            result = e;
+        }
+        
+        public synchronized void waitCalls(int calls) throws InterruptedException {
+            expectedCalls += calls;
+            wait();
+        }
+    }
+
     Executor service = Executors.newSingleThreadExecutor();
 
     // Helper lists
@@ -57,24 +83,19 @@ public class DelayedQueueTest extends TestCase {
 
     Delayed result;
 
-    OnTimeListener<Delayed> listener = new OnTimeListener<Delayed>() {
-        @Override
-        public void onTime(Delayed e) {
-            callCount++;
-            result = e;
-        }
-    };
 
     private DelayedQueue<Delayed> queue;
+
+    private ListenerTest listener;
 
     public DelayedQueueTest() {
     }
 
     @Before
     public void setUp() throws Exception {
-        callCount = 0;
         result = null;
         queue = new DelayedQueue<Delayed>();
+        listener = new ListenerTest();
         queue.setOnTimeListener(listener);
 
         for (int i = 0; i < 10; i++) {
@@ -106,49 +127,44 @@ public class DelayedQueueTest extends TestCase {
         assertNotNull("Element was mistakenly removed with stopped timer",
                 queue.peek());
         assertEquals("Listener method was called with timer stopped", 0,
-                callCount);
+                listener.getCallCount());
 
         queue.add(new DelayedTest(DateTime.now().minusSeconds(1).getMillis()));
         assertEquals(
                 "Listener method was called with timer stopped with passed time",
-                0, callCount);
+                0, listener.getCallCount());
 
         // Start again to check if the elements are consumed
         queue.start();
 
-        queue.get();
-        queue.get();
-        queue.get();
-        queue.stay();
+        listener.waitCalls(3);
 
         assertNull("Failed to remove the elements", queue.peek());
-        assertEquals("All element should fire", 3, callCount);
+        assertEquals("All element should fire", 3, listener.getCallCount());
     }
 
     @Test
     public void test_simpleAdds() throws InterruptedException {
-
         DelayedTest ontime = new DelayedTest(
                 DateTime.now().plusSeconds(1).getMillis());
         queue.add(ontime);
 
-        queue.get();
-        queue.stay();
+        listener.waitCalls(1);
 
         assertNull("Failed to remove the element", queue.peek());
-        assertEquals("Listener method was not called", 1, callCount);
+        assertEquals("Listener method was not called", 1, listener.getCallCount());
         assertEquals("The right element was not passed to the listener", ontime,
                 result);
 
+        
         DelayedTest late = new DelayedTest(
                 DateTime.now().minusSeconds(1).getMillis());
         queue.add(late);
 
-        queue.get();
-        queue.stay();
+        listener.waitCalls(1);
 
         assertEquals("Listener not fired when add an already passed time", 2,
-                callCount);
+                listener.getCallCount());
         assertEquals("The right element was not passed to the listener", late,
                 result);
 
@@ -178,11 +194,10 @@ public class DelayedQueueTest extends TestCase {
         assertEquals("Wrong size based on List after removed",
                 addList.size() - 1, queue.size());
 
-        queue.get();
-        queue.stay();
+        listener.waitCalls(1);
 
         assertEquals("Listener method was not called the right amount of times",
-                1, callCount);
+                1, listener.getCallCount());
         assertEquals("The right element was not passed to the listener",
                 addList.get(1), result);
 
@@ -190,11 +205,10 @@ public class DelayedQueueTest extends TestCase {
         assertEquals("Wrong size based on List after removed",
                 addList.size() - 3, queue.size());
 
-        queue.get();
-        queue.stay();
+        listener.waitCalls(1);
 
         assertEquals("Listener method was not called the right amount of times",
-                2, callCount);
+                2, listener.getCallCount());
         assertEquals("The right element was not passed to the listener",
                 addList.get(3), result);
 
