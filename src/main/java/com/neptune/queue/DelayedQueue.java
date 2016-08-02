@@ -27,6 +27,7 @@ import org.apache.logging.log4j.Logger;
  * threads and not in the main. The Data Thread are threads that can be created
  * if the object Data D implements runnable, and can be executed when the item
  * is consumed.
+ * 
  * @author Rafael
  *
  * @param <E>
@@ -70,17 +71,17 @@ public final class DelayedQueue<E extends Delayed>
      * Timing listener. Starts with null, but is assigned to a dummy later.
      */
     @SuppressWarnings("unchecked")
-    private OnTimeListener<E> mOnTimeListener = (OnTimeListener<E>) DUMMY;
+    private transient OnTimeListener<E> mOnTimeListener = (OnTimeListener<E>) DUMMY;
 
     /**
      * Lock used in blocking operations.
      */
-    private transient final ReentrantLock lock;
+    private final transient ReentrantLock lock;
 
     /**
      * Executor that runs this Delayed Queue.
      */
-    private transient final ScheduledExecutorService scheduler;
+    private final transient ScheduledExecutorService scheduler;
 
     /**
      * The Future representation of the Consumer.
@@ -95,7 +96,7 @@ public final class DelayedQueue<E extends Delayed>
      * Pool can take advantage of having the same Runnable firing multiple
      * times.
      */
-    private transient final Callable<E> consumer = new Callable<E>() {
+    private final transient Callable<E> consumer = new Callable<E>() {
 
         /**
          * Remove the queue's head and fire the {@link DelayedQueue#consume(E)}
@@ -125,13 +126,13 @@ public final class DelayedQueue<E extends Delayed>
      * Executor for callback threads. Callback have their own thread because the
      * scheduler thread cannot stop
      */
-    private transient final ExecutorService callbacks;
+    private final transient ExecutorService callbacks;
 
     /**
      * Executor for item threads. If item also implement a Runnable, then it
      * will execute in this executor when is consumed.
      */
-    private transient final ExecutorService runners;
+    private final transient ExecutorService runners;
 
     /**
      * Initialize the Queue and its {@link ScheduledExecutorService}.
@@ -207,10 +208,11 @@ public final class DelayedQueue<E extends Delayed>
      */
     private void reschedule(final E item) {
         final ReentrantLock locking = this.lock;
-        locking.lock();
-        LOGGER.trace("reschedule() {");
 
+        locking.lock();
         try {
+            LOGGER.trace("reschedule() {");
+
             if (!this.started) {
                 return;
             }
