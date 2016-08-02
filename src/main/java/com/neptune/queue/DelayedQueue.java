@@ -26,8 +26,7 @@ import org.apache.logging.log4j.Logger;
  * fired for the Listener, and therefore the listener events happens in those
  * threads and not in the main. The Data Thread are threads that can be created
  * if the object Data D implements runnable, and can be executed when the item
- * is consumed. FIXME: Remove implementations that just wrappers super methods
- * 
+ * is consumed.
  * @author Rafael
  *
  * @param <E>
@@ -41,6 +40,11 @@ public final class DelayedQueue<E extends Delayed>
      * UID serial version.
      */
     private static final long serialVersionUID = 1L;
+
+    /**
+     * Default array capacity.
+     */
+    private static final int DEFAULT_INITIAL_CAPACITY = 11;
 
     /**
      * The time unit used as minimal unit measurable by this scheduler.
@@ -71,12 +75,12 @@ public final class DelayedQueue<E extends Delayed>
     /**
      * Lock used in blocking operations.
      */
-    private final ReentrantLock lock;
+    private transient final ReentrantLock lock;
 
     /**
      * Executor that runs this Delayed Queue.
      */
-    private final ScheduledExecutorService scheduler;
+    private transient final ScheduledExecutorService scheduler;
 
     /**
      * The Future representation of the Consumer.
@@ -91,7 +95,7 @@ public final class DelayedQueue<E extends Delayed>
      * Pool can take advantage of having the same Runnable firing multiple
      * times.
      */
-    private Callable<E> consumer = new Callable<E>() {
+    private transient final Callable<E> consumer = new Callable<E>() {
 
         /**
          * Remove the queue's head and fire the {@link DelayedQueue#consume(E)}
@@ -118,23 +122,22 @@ public final class DelayedQueue<E extends Delayed>
     private boolean started;
 
     /**
-     * Executor for callback threads.
-     * Callback have their own thread because the scheduler thread cannot stop
+     * Executor for callback threads. Callback have their own thread because the
+     * scheduler thread cannot stop
      */
-    private ExecutorService callbacks;
+    private transient final ExecutorService callbacks;
 
     /**
-     * Executor for item threads.
-     * If item also implement a Runnable, then it will execute in this executor
-     * when is consumed.
+     * Executor for item threads. If item also implement a Runnable, then it
+     * will execute in this executor when is consumed.
      */
-    private ExecutorService runners;
+    private transient final ExecutorService runners;
 
     /**
      * Initialize the Queue and its {@link ScheduledExecutorService}.
      */
     public DelayedQueue() {
-        this(1);
+        this(DEFAULT_INITIAL_CAPACITY);
     }
 
     /**
@@ -144,7 +147,7 @@ public final class DelayedQueue<E extends Delayed>
      *            used to define the size of the queue, and also the capacity of
      *            the ThreadPool for callbacks
      */
-    public DelayedQueue(int initialCapacity) {
+    public DelayedQueue(final int initialCapacity) {
         super(initialCapacity);
 
         this.lock = new ReentrantLock();
@@ -179,7 +182,7 @@ public final class DelayedQueue<E extends Delayed>
     }
 
     /**
-     * Cancel the {@link DelayedQueue#future}
+     * Cancel the {@link DelayedQueue#future}.
      */
     private void cancel() {
         // Does not cancel a future that doesn't exist or a running task
@@ -202,9 +205,9 @@ public final class DelayedQueue<E extends Delayed>
      *            element that needs to be rescheduled!
      * @see DelayedQueue#consumer
      */
-    private synchronized void reschedule(final E item) {
-        final ReentrantLock lock = this.lock;
-        lock.lock();
+    private void reschedule(final E item) {
+        final ReentrantLock locking = this.lock;
+        locking.lock();
         LOGGER.trace("reschedule() {");
 
         try {
@@ -235,7 +238,7 @@ public final class DelayedQueue<E extends Delayed>
             }
         } finally {
             LOGGER.trace("reschedule() }");
-            lock.unlock();
+            locking.unlock();
         }
     }
 
@@ -283,10 +286,10 @@ public final class DelayedQueue<E extends Delayed>
     public void stay() {
         LOGGER.trace("stay() {");
 
-        if (future != null) {
+        if (this.future != null) {
             while (super.size() > 0 && this.started) {
                 try {
-                    future.get();
+                    this.future.get();
                 } catch (CancellationException e) {
                     LOGGER.debug("Soft Failing at stay() cancellation");
                 } catch (InterruptedException | ExecutionException e) {
@@ -329,38 +332,6 @@ public final class DelayedQueue<E extends Delayed>
     }
 
     /**
-     * Depends on {@link DelayedQueue#offer(Delayed)} implementation.
-     */
-    @Override
-    public void put(final E e) {
-        super.put(e);
-    }
-
-    /**
-     * Depends on {@link DelayedQueue#offer(Delayed)} implementation.
-     */
-    @Override
-    public boolean add(final E e) {
-        return super.add(e);
-    }
-
-    /**
-     * Depends on {@link DelayedQueue#offer(Delayed)} implementation.
-     */
-    @Override
-    public boolean addAll(final Collection<? extends E> c) {
-        return super.addAll(c);
-    }
-
-    /**
-     * Depends on {@link DelayedQueue#offer(Delayed)} implementation.
-     */
-    @Override
-    public boolean offer(final E e, final long timeout, final TimeUnit unit) {
-        return super.offer(e, timeout, unit);
-    }
-
-    /**
      * Basically all insertions depends on this method.
      */
     @Override
@@ -386,14 +357,6 @@ public final class DelayedQueue<E extends Delayed>
         }
 
         return returned;
-    }
-
-    /**
-     * Depends on {@link DelayedQueue#poll()} implementation.
-     */
-    @Override
-    public E remove() {
-        return super.remove();
     }
 
     @Override
@@ -518,14 +481,6 @@ public final class DelayedQueue<E extends Delayed>
 
     }
 
-    /**
-     * Depends on drainTo() implementation.
-     */
-    @Override
-    public int drainTo(final Collection<? super E> c) {
-        return super.drainTo(c);
-    }
-
     @Override
     public int drainTo(final Collection<? super E> c, final int maxElements) {
         // super value
@@ -560,6 +515,7 @@ public final class DelayedQueue<E extends Delayed>
      *            {@link Delayed}
      */
     public interface OnTimeListener<E> {
+
         /**
          * Fired when a thread finishes waiting.
          * 

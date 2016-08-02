@@ -67,8 +67,9 @@ public class DelayedQueueTest extends TestCase {
             }
             result = e;
         }
-        
-        public synchronized void waitCalls(int calls) throws InterruptedException {
+
+        public synchronized void waitCalls(int calls)
+                throws InterruptedException {
             expectedCalls += calls;
             wait();
         }
@@ -82,7 +83,6 @@ public class DelayedQueueTest extends TestCase {
     List<Delayed> retainList = new LinkedList<>();
 
     Delayed result;
-
 
     private DelayedQueue<Delayed> queue;
 
@@ -152,11 +152,11 @@ public class DelayedQueueTest extends TestCase {
         listener.waitCalls(1);
 
         assertNull("Failed to remove the element", queue.peek());
-        assertEquals("Listener method was not called", 1, listener.getCallCount());
+        assertEquals("Listener method was not called", 1,
+                listener.getCallCount());
         assertEquals("The right element was not passed to the listener", ontime,
                 result);
 
-        
         DelayedTest late = new DelayedTest(
                 DateTime.now().minusSeconds(1).getMillis());
         queue.add(late);
@@ -180,16 +180,12 @@ public class DelayedQueueTest extends TestCase {
     }
 
     @Test
-    public void test_stay()
-            throws InterruptedException, ExecutionException {
+    public void test_stay() throws InterruptedException, ExecutionException {
 
-        queue.add(new DelayedTest(
-                DateTime.now().plusMillis(100).getMillis()));
-        queue.add(new DelayedTest(
-                DateTime.now().plusMillis(200).getMillis()));
-        queue.add(new DelayedTest(
-                DateTime.now().plusMillis(250).getMillis()));
-        
+        queue.add(new DelayedTest(DateTime.now().plusMillis(100).getMillis()));
+        queue.add(new DelayedTest(DateTime.now().plusMillis(200).getMillis()));
+        queue.add(new DelayedTest(DateTime.now().plusMillis(250).getMillis()));
+
         queue.stay();
 
         assertEquals("Wrong size after stay", 0, queue.size());
@@ -239,7 +235,20 @@ public class DelayedQueueTest extends TestCase {
 
     @Test
     public void test_timeChecker() throws InterruptedException {
-        // FIXME implement tests for timing!
+        // acceptable error for time function
+        long error = 100;
+
+        DateTime snap = DateTime.now();
+        queue.add(new DelayedTest(snap.plusSeconds(1).getMillis()));
+
+        queue.get();
+
+        DateTime now = DateTime.now();
+        assertTrue(
+                "Timing check " + snap.plusSeconds(1) + " against " + now
+                        + " failed",
+                Math.abs(now.getMillis()
+                        - snap.plusSeconds(1).getMillis()) <= error);
     }
 
     @Test
