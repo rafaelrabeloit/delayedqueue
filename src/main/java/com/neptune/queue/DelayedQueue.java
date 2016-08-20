@@ -269,7 +269,7 @@ public final class DelayedQueue<E extends Delayed>
      *            The item that has been consumed
      */
     private void consume(final E item) {
-        if (item != null && item.getClass().isAssignableFrom(Runnable.class)) {
+        if (item != null && (item instanceof Runnable)) {
             LOGGER.info("Running 'data' because it is runnable!");
 
             this.runners.execute((Runnable) item);

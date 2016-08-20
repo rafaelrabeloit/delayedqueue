@@ -47,6 +47,22 @@ public class DelayedQueueTest extends TestCase {
 
     }
 
+    class DelayedRunTest extends DelayedTest implements Runnable {
+
+        public int callCount = 0;
+
+        public DelayedRunTest(long delay) {
+            super(delay);
+        }
+
+        @Override
+        public synchronized void run() {
+            callCount++;
+            this.notify();
+        }
+
+    }
+
     class ListenerTest implements OnTimeListener<Delayed> {
         private int callCount = 0;
         private int expectedCalls = 0;
@@ -262,5 +278,20 @@ public class DelayedQueueTest extends TestCase {
             }
         });
         assertEquals("Dead Locking", addList.get(0), queue.take());
+    }
+
+    @Test
+    public void test_runnableData() throws InterruptedException {
+
+        DelayedRunTest run = new DelayedRunTest(
+                DateTime.now().plusSeconds(1).getMillis());
+        queue.add(run);
+
+        // wait until is run
+        synchronized (run) {
+            run.wait(1500);
+        }
+
+        assertEquals("Data object running failed", 1, run.callCount);
     }
 }
