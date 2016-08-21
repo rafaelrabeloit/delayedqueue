@@ -129,12 +129,6 @@ public final class DelayedQueue<E extends Delayed>
     private final transient ExecutorService callbacks;
 
     /**
-     * Executor for item threads. If item also implement a Runnable, then it
-     * will execute in this executor when is consumed.
-     */
-    private final transient ExecutorService runners;
-
-    /**
      * Initialize the Queue and its {@link ScheduledExecutorService}.
      */
     public DelayedQueue() {
@@ -157,7 +151,6 @@ public final class DelayedQueue<E extends Delayed>
                 Executors.privilegedThreadFactory());
 
         this.callbacks = Executors.newFixedThreadPool(initialCapacity);
-        this.runners = Executors.newFixedThreadPool(initialCapacity);
 
         this.start();
     }
@@ -269,13 +262,13 @@ public final class DelayedQueue<E extends Delayed>
      *            The item that has been consumed
      */
     private void consume(final E item) {
-        if (item != null && (item instanceof Runnable)) {
-            LOGGER.info("Running 'data' because it is runnable!");
-
-            this.runners.execute((Runnable) item);
-        }
-
         Runnable run = () -> {
+            if (item != null && (item instanceof Runnable)) {
+                LOGGER.info("Running 'data' because it is runnable!");
+    
+                ((Runnable) item).run();
+            }
+
             DelayedQueue.this.mOnTimeListener.onTime(item);
             LOGGER.debug(item + " consumed");
         };
