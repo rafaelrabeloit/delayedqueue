@@ -61,9 +61,14 @@ public final class DelayedQueue<E extends Delayed>
     /**
      * Dummy listener to avoid null pointer exceptions.
      */
-    private static final OnTimeListener<?> DUMMY = new OnTimeListener<Delayed>() {
+    private static final OnTimeListener<Delayed> DUMMY = new OnTimeListener<Delayed>() {
         @Override
         public void onTime(final Delayed e) {
+        }
+
+        @Override
+        public Delayed onBeforeRun(Delayed e) {
+            return null;
         }
     };
 
@@ -81,7 +86,7 @@ public final class DelayedQueue<E extends Delayed>
     /**
      * Executor that runs this Delayed Queue.
      */
-    private final transient ScheduledExecutorService scheduler;
+    private transient ScheduledExecutorService scheduler;
 
     /**
      * The Future representation of the Consumer.
@@ -126,13 +131,17 @@ public final class DelayedQueue<E extends Delayed>
      * Executor for callback threads. Callback have their own thread because the
      * scheduler thread cannot stop
      */
-    private final transient ExecutorService callbacks;
+    private transient ExecutorService callbacks;
+
+    private int capacity = DEFAULT_INITIAL_CAPACITY;
+
+    private boolean grows;
 
     /**
      * Initialize the Queue and its {@link ScheduledExecutorService}.
      */
     public DelayedQueue() {
-        this(DEFAULT_INITIAL_CAPACITY);
+        this(DEFAULT_INITIAL_CAPACITY, true);
     }
 
     /**
@@ -143,14 +152,29 @@ public final class DelayedQueue<E extends Delayed>
      *            the ThreadPool for callbacks
      */
     public DelayedQueue(final int initialCapacity) {
-        super(initialCapacity);
+        this(initialCapacity, true);
+    }
+
+    /**
+     * Initialize the Queue and its {@link ScheduledExecutorService}.
+     * 
+     * @param initialCapacity
+     *            used to define the size of the queue, and also the capacity of
+     *            the ThreadPool for callbacks
+     * @param shouldGrow
+     *            define if the queue is bounded by its initial capacity.
+     *            Meaning that it will never have more elements than its initial
+     *            size
+     */
+    public DelayedQueue(final int initialCapacity, boolean shouldGrow) {
+        // add 1 if the queue cannot grow because that will be the max size
+        // The queue actually will grow in 1 if a more priority element wants
+        // to be added
+        super(initialCapacity + (shouldGrow ? 0 : 1));
 
         this.lock = new ReentrantLock();
-
-        this.scheduler = Executors.newSingleThreadScheduledExecutor(
-                Executors.privilegedThreadFactory());
-
-        this.callbacks = Executors.newFixedThreadPool(initialCapacity);
+        this.capacity = initialCapacity;
+        this.grows = shouldGrow;
 
         this.start();
     }
@@ -162,17 +186,30 @@ public final class DelayedQueue<E extends Delayed>
         LOGGER.info("Starting Delayed Queue");
         if (!this.started) {
             this.started = true;
+
+            this.scheduler = Executors.newSingleThreadScheduledExecutor(
+                    Executors.privilegedThreadFactory());
+
+            this.callbacks = Executors.newFixedThreadPool(this.capacity);
+
             this.reschedule(this.peek());
         }
     }
 
     /**
      * Cancel the {@link DelayedQueue#future} and prevent any reschedule.
+     * 
+     * @throws InterruptedException
      */
-    public void stop() {
+    public void stop() throws InterruptedException {
         LOGGER.info("Stopping Delayed Queue");
         this.started = false;
         this.cancel();
+        this.scheduler.shutdownNow();
+        this.scheduler.awaitTermination(1000, TimeUnit.MILLISECONDS);
+
+        this.callbacks.shutdownNow();
+        this.callbacks.awaitTermination(1000, TimeUnit.MILLISECONDS);
     }
 
     /**
@@ -237,6 +274,15 @@ public final class DelayedQueue<E extends Delayed>
         }
     }
 
+    @SuppressWarnings("unchecked")
+    private E last() {
+        if (this.size() == 0) {
+            return null;
+        }
+
+        return (E) this.toArray()[this.size() - 1];
+    }
+
     /**
      * Set the listener for when the timer for the top object is fired. Setting
      * it to null will disable listening.
@@ -263,14 +309,23 @@ public final class DelayedQueue<E extends Delayed>
      */
     private void consume(final E item) {
         Runnable run = () -> {
-            if (item != null && (item instanceof Runnable)) {
-                LOGGER.info("Running 'data' because it is runnable!");
-    
-                ((Runnable) item).run();
+
+            E processingItem = DelayedQueue.this.mOnTimeListener
+                    .onBeforeRun(item);
+
+            if (processingItem == null) {
+                processingItem = item;
             }
 
-            DelayedQueue.this.mOnTimeListener.onTime(item);
-            LOGGER.debug(item + " consumed");
+            if (processingItem != null
+                    && (processingItem instanceof Runnable)) {
+                LOGGER.info("Running 'data' because it is runnable!");
+
+                ((Runnable) processingItem).run();
+            }
+
+            DelayedQueue.this.mOnTimeListener.onTime(processingItem);
+            LOGGER.debug(processingItem + " consumed");
         };
         callbacks.submit(run);
     }
@@ -341,17 +396,39 @@ public final class DelayedQueue<E extends Delayed>
             this.consume(e);
             returned = true;
         } else {
-            // calling super
-            returned = super.offer(e);
 
-            // if it is necessary...
-            if (returned && peek() == e) {
-                // reschedule
-                reschedule(peek());
+            // see if the queue is allowed to grow, or if still has space
+            // or if it doesn't have space, but the new item is more priority
+            if (this.grows || this.size() < this.capacity
+                    || (this.size() >= this.capacity && this.last()
+                            .getDelay(TIMEUNIT) > e.getDelay(TIMEUNIT))) {
+                // calling super
+                returned = super.offer(e);
+
+                // if it is necessary...
+                if (returned && peek() == e) {
+                    // reschedule
+                    reschedule(peek());
+                }
+
+                // if the queue grew, and shouldn't
+                if (!this.grows && this.size() > this.capacity) {
+                    this.remove(this.last());
+                }
             }
         }
 
         return returned;
+    }
+
+    @Override
+    public void put(E e) {
+        while (!this.offer(e)) {
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException ex) {
+            }
+        }
     }
 
     @Override
@@ -502,6 +579,15 @@ public final class DelayedQueue<E extends Delayed>
         reschedule(null);
     }
 
+    @Override
+    public int remainingCapacity() {
+        if (this.grows) {
+            return super.remainingCapacity();
+        } else {
+            return this.capacity - this.size();
+        }
+    }
+
     /**
      * Interface for Listening on timings.
      *
@@ -518,6 +604,16 @@ public final class DelayedQueue<E extends Delayed>
          *            element that was fired
          */
         void onTime(E e);
+
+        /**
+         * Executed before any kind of process is made by the queue.
+         * 
+         * @param e
+         *            element that is about to be processed
+         * @return The instance after any kind of transformation. A {@code null}
+         *         will make the queue process the original element.
+         */
+        E onBeforeRun(E e);
     }
 
 }
