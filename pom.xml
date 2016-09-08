@@ -30,10 +30,25 @@
 		<system>Jenkins</system>
 		<url>http://jen.neptune.li/job/DelayedQueue/</url>
 	</ciManagement>
+	<distributionManagement>
+		<repository>
+			<uniqueVersion>false</uniqueVersion>
+			<id>neptune.li</id>
+			<url>sftp://neptune.li/srv/mvn</url>
+		</repository>
+	</distributionManagement>
 	<scm>
 		<connection>scm:git:http://pha.neptune.li/diffusion/LDQUEUE/delayedqueue.git</connection>
 		<url>http://pha.neptune.li/diffusion/LDQUEUE/</url>
 	</scm>
+
+	<repositories>
+		<repository>
+			<id>neptune.li</id>
+			<name>Neptune.li Private Repository</name>
+			<url>sftp://neptune.li/srv/mvn</url>
+		</repository>
+	</repositories>
 
 	<properties>
 
@@ -45,6 +60,7 @@
 		<!-- Build plugin versions -->
 		<compiler-plugin-version>3.5.1</compiler-plugin-version>
 		<dependency-plugin-version>2.10</dependency-plugin-version>
+		<wagon-extension-version>2.10</wagon-extension-version>
 
 		<!-- Report plugin versions -->
 		<project-info-plugin-version>2.9</project-info-plugin-version>
@@ -244,5 +260,12 @@
 			</plugin>
 		</plugins>
 
+		<extensions>
+			<extension>
+				<groupId>org.apache.maven.wagon</groupId>
+				<artifactId>wagon-ssh</artifactId>
+				<version>${wagon-extension-version}</version>
+			</extension>
+		</extensions>
 	</build>
 </project>
