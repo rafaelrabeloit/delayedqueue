@@ -38,6 +38,16 @@ public final class DelayedQueue<E extends Delayed>
         extends PriorityBlockingQueue<E> {
 
     /**
+     * Await time for polling.
+     */
+    private static final int INTERVAL_POLL_TIME = 10;
+
+    /**
+     * Max awaiting time for executors.
+     */
+    private static final int MAX_AWAIT_TIME = 1000;
+
+    /**
      * UID serial version.
      */
     private static final long serialVersionUID = 1L;
@@ -67,7 +77,7 @@ public final class DelayedQueue<E extends Delayed>
         }
 
         @Override
-        public Delayed onBeforeRun(Delayed e) {
+        public Delayed onBeforeRun(final Delayed e) {
             return null;
         }
     };
@@ -166,7 +176,7 @@ public final class DelayedQueue<E extends Delayed>
      *            Meaning that it will never have more elements than its initial
      *            size
      */
-    public DelayedQueue(final int initialCapacity, boolean shouldGrow) {
+    public DelayedQueue(final int initialCapacity, final boolean shouldGrow) {
         // add 1 if the queue cannot grow because that will be the max size
         // The queue actually will grow in 1 if a more priority element wants
         // to be added
@@ -200,16 +210,17 @@ public final class DelayedQueue<E extends Delayed>
      * Cancel the {@link DelayedQueue#future} and prevent any reschedule.
      * 
      * @throws InterruptedException
+     *             if the awaiting for the scheduler is interrupted
      */
     public void stop() throws InterruptedException {
         LOGGER.info("Stopping Delayed Queue");
         this.started = false;
         this.cancel();
         this.scheduler.shutdownNow();
-        this.scheduler.awaitTermination(1000, TimeUnit.MILLISECONDS);
+        this.scheduler.awaitTermination(MAX_AWAIT_TIME, TimeUnit.MILLISECONDS);
 
         this.callbacks.shutdownNow();
-        this.callbacks.awaitTermination(1000, TimeUnit.MILLISECONDS);
+        this.callbacks.awaitTermination(MAX_AWAIT_TIME, TimeUnit.MILLISECONDS);
     }
 
     /**
@@ -274,6 +285,11 @@ public final class DelayedQueue<E extends Delayed>
         }
     }
 
+    /**
+     * Returns the last element in the queue.
+     * 
+     * @return the last element
+     */
     @SuppressWarnings("unchecked")
     private E last() {
         if (this.size() == 0) {
@@ -317,8 +333,7 @@ public final class DelayedQueue<E extends Delayed>
                 processingItem = item;
             }
 
-            if (processingItem != null
-                    && (processingItem instanceof Runnable)) {
+            if (processingItem != null && processingItem instanceof Runnable) {
                 LOGGER.info("Running 'data' because it is runnable!");
 
                 ((Runnable) processingItem).run();
@@ -400,8 +415,8 @@ public final class DelayedQueue<E extends Delayed>
             // see if the queue is allowed to grow, or if still has space
             // or if it doesn't have space, but the new item is more priority
             if (this.grows || this.size() < this.capacity
-                    || (this.size() >= this.capacity && this.last()
-                            .getDelay(TIMEUNIT) > e.getDelay(TIMEUNIT))) {
+                    || this.size() >= this.capacity && this.last()
+                            .getDelay(TIMEUNIT) > e.getDelay(TIMEUNIT)) {
                 // calling super
                 returned = super.offer(e);
 
@@ -422,10 +437,10 @@ public final class DelayedQueue<E extends Delayed>
     }
 
     @Override
-    public void put(E e) {
+    public void put(final E e) {
         while (!this.offer(e)) {
             try {
-                Thread.sleep(10);
+                Thread.sleep(INTERVAL_POLL_TIME);
             } catch (InterruptedException ex) {
             }
         }
